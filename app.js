@@ -140,7 +140,7 @@ function mirrorLeftToRight(){
 }
 $('mirrorLeft').addEventListener('click',mirrorLeftToRight);
 function buildDefaults(){
- clearRig(); const c=box.getCenter(new THREE.Vector3()),sz=box.getSize(new THREE.Vector3()); centerX=c.x;
+ clearRig(); const c=box.getCenter(new THREE.Vector3()),sz=box.getSize(new THREE.Vector3()); centerX=3.725290298461914e-8;
  for(const side of ['Left','Right']){
   const sx=side==='Left'?c.x-sz.x*.25:c.x+sz.x*.25, medial=side==='Left'?1:-1;
   addMarker(byName[side+' Leg'],new THREE.Vector3(sx,box.max.y,box.min.z));
