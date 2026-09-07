@@ -63,17 +63,25 @@ function redrawBones(){
 function counterpart(n){return n.startsWith('Left ')?'Right '+n.slice(5):n.startsWith('Right ')?'Left '+n.slice(6):null;}
 let centerX=0,current=null,updating=false;
 function mirrorPoint(p){return new THREE.Vector3(2*centerX-p.x,p.y,p.z);}
-function syncInputs(){if(!current)return;for(const a of ['x','y','z']){$(a+'r').value=current.position[a];$(a+'n').value=current.position[a].toFixed(5);}}
+function syncInputs(){if(!current)return;for(const a of ['x','y','z'])$(a+'n').value=current.position[a].toFixed(5);}
 function pick(name){current=markers[name];if(current){transform.attach(current);$('joint').value=name;syncInputs();requestRender();}}
 $('joint').addEventListener('change',()=>pick($('joint').value));
 
 const coord=$('coords');
+function nudge(axis,sign){
+ if(!current)return;
+ const step=Number($('nudgeStep').value)||0.001;
+ current.position[axis]+=step*sign;
+ changed();
+}
 for(const a of ['x','y','z']){
  const row=document.createElement('div');row.className='coord';
- row.innerHTML='<b>'+a.toUpperCase()+'</b><input id="'+a+'r" type="range" min="-2" max="2" step="0.0001"><input id="'+a+'n" type="number" step="0.0001">';
+ row.innerHTML='<span class="axis">'+a.toUpperCase()+'</span><button class="nudge" type="button" aria-label="'+a.toUpperCase()+' decrease">−</button><input id="'+a+'n" type="number" step="0.0001" inputmode="decimal"><button class="nudge" type="button" aria-label="'+a.toUpperCase()+' increase">+</button>';
  coord.appendChild(row);
- $(a+'r').addEventListener('input',e=>{if(current){current.position[a]=Number(e.target.value);changed();}});
- $(a+'n').addEventListener('change',e=>{if(current){current.position[a]=Number(e.target.value);changed();}});
+ const buttons=row.querySelectorAll('.nudge');
+ buttons[0].addEventListener('click',()=>nudge(a,-1));
+ buttons[1].addEventListener('click',()=>nudge(a,1));
+ $(a+'n').addEventListener('change',e=>{if(current&&Number.isFinite(Number(e.target.value))){current.position[a]=Number(e.target.value);changed();}});
 }
 
 function save(){
