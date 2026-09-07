@@ -15,10 +15,10 @@ function addUI(){
  const panel=$('panel'),d=document.createElement('div');d.id='paintPanel';
  d.innerHTML='<hr><div class="nudgeHead"><b>Vertex Region Painter</b><label><input id="paintMode" type="checkbox"> Paint mode</label></div>'+
  '<div class="row"><label>Region <select id="region"></select></label><label>Brush <input id="brush" type="range" min="0.0015" max="0.025" step="0.0005" value="0.006"></label><span id="brushVal">0.0060</span></div>'+
- '<div class="row"><label><input id="mirrorPaint" type="checkbox" checked> Mirror paint</label><label><input id="paintColors" type="checkbox" checked> Show selected vertices</label><button id="paintUndo">Undo</button><button id="paintRedo">Redo</button><button id="paintClear">Clear labels</button></div>'+
+ '<div class="row"><label><input id="mirrorPaint" type="checkbox" checked> Mirror paint</label><label><input id="paintColors" type="checkbox" checked> Show painted faces</label><button id="paintUndo">Undo</button><button id="paintRedo">Redo</button><button id="paintClear">Clear labels</button></div>'+
  '<div class="row"><button id="paintCopy">Copy JSON</button><button id="paintSave">Save now</button><button id="paintLoad">Load JSON</button><input id="paintImport" type="file" accept=".json,application/json" hidden></div>'+
  '<div id="paintStatus">Load the model, then enable Paint mode. Painting is saved automatically on-device.</div>'+
- '<p>Paint anatomical regions directly onto vertices. The mesh itself is not tinted: only the selected vertices are shown as crisp colored points. Each complete drag is stored as one undo step.</p>';
+ '<p>Painting still stores anatomical labels per vertex. The visualizer displays those labels as crisp, discrete mesh triangles with no soft blending. A triangle is shown only when at least two of its three vertices agree on the same painted region, preventing one shared vertex from visually bleeding into surrounding triangles. Each complete drag is one undo step.</p>';
  panel.appendChild(d);
  const sel=$('region');R.forEach((r,i)=>{let o=document.createElement('option');o.value=i;o.textContent=(i?'':'Eraser / ')+r[0];sel.appendChild(o)});
  $('brush').oninput=()=>{$('brushVal').textContent=(+$('brush').value).toFixed(4)};
@@ -38,20 +38,67 @@ function buildTargets(){
 }
 function ensureOverlay(t){
  if(t.overlay)return;
- const og=new THREE.BufferGeometry();og.setAttribute('position',t.mesh.geometry.attributes.position);
- t.overlayColor=new THREE.Float32BufferAttribute(new Float32Array(t.labels.length*3),3);t.overlayColor.setUsage(THREE.DynamicDrawUsage);og.setAttribute('color',t.overlayColor);
- const visible=new THREE.Float32BufferAttribute(new Float32Array(t.labels.length),1);visible.setUsage(THREE.DynamicDrawUsage);og.setAttribute('labelVisible',visible);
+ const src=t.mesh.geometry,idx=src.index?src.index.array:null,count=idx?idx.length:src.attributes.position.count;
+ const og=new THREE.BufferGeometry();
+ // Duplicate each triangle's vertices so every face can have one flat color.
+ for(const name in src.attributes){
+  const a=src.attributes[name],arr=new a.array.constructor(count*a.itemSize);
+  for(let i=0;i<count;i++){const si=idx?idx[i]:i;for(let k=0;k<a.itemSize;k++)arr[i*a.itemSize+k]=a.array[si*a.itemSize+k]}
+  og.setAttribute(name,new THREE.BufferAttribute(arr,a.itemSize,a.normalized));
+ }
+ t.faceMap=new Uint32Array(count);for(let i=0;i<count;i++)t.faceMap[i]=idx?idx[i]:i;
+ t.overlayColor=new THREE.Float32BufferAttribute(new Float32Array(count*3),3);t.overlayColor.setUsage(THREE.DynamicDrawUsage);og.setAttribute('color',t.overlayColor);
+ t.overlayVisible=new THREE.Float32BufferAttribute(new Float32Array(count),1);t.overlayVisible.setUsage(THREE.DynamicDrawUsage);og.setAttribute('labelVisible',t.overlayVisible);
+ // This mesh is attached to the source mesh and copies skin attributes, so it follows the rig exactly.
  const mat=new THREE.ShaderMaterial({
-  transparent:true,depthTest:true,depthWrite:false,vertexColors:false,
-  vertexShader:'attribute vec3 color; attribute float labelVisible; varying vec3 vColor; varying float vVisible; void main(){vColor=color;vVisible=labelVisible;vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;gl_PointSize=6.0;}',
-  fragmentShader:'precision mediump float; varying vec3 vColor; varying float vVisible; void main(){if(vVisible<0.5) discard; vec2 p=gl_PointCoord-vec2(0.5); if(dot(p,p)>0.25) discard; gl_FragColor=vec4(vColor,1.0);}'
+  transparent:true,depthTest:true,depthWrite:false,skinning:t.mesh.isSkinnedMesh,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1,
+  vertexShader:`attribute vec3 color; attribute float labelVisible; varying vec3 vColor; varying float vVisible;
+#include <common>
+#include <uv_pars_vertex>
+#include <uv2_pars_vertex>
+#include <color_pars_vertex>
+#include <fog_pars_vertex>
+#include <morphtarget_pars_vertex>
+#include <skinning_pars_vertex>
+#include <logdepthbuf_pars_vertex>
+#include <clipping_planes_pars_vertex>
+void main(){vColor=color;vVisible=labelVisible;
+#include <uv_vertex>
+#include <uv2_vertex>
+#include <color_vertex>
+#include <beginnormal_vertex>
+#include <morphnormal_vertex>
+#include <skinbase_vertex>
+#include <skinnormal_vertex>
+#include <defaultnormal_vertex>
+#include <begin_vertex>
+#include <morphtarget_vertex>
+#include <skinning_vertex>
+#include <project_vertex>
+#include <logdepthbuf_vertex>
+#include <clipping_planes_vertex>
+#include <worldpos_vertex>
+#include <fog_vertex>
+}`,
+  fragmentShader:`precision mediump float; varying vec3 vColor; varying float vVisible; void main(){if(vVisible<0.5) discard; gl_FragColor=vec4(vColor,0.82);}`
  });
- t.overlay=new THREE.Points(og,mat);t.overlay.name='PaintedVertexOverlay';t.overlay.frustumCulled=false;t.overlay.renderOrder=1000;t.mesh.add(t.overlay);
+ t.overlay=new THREE.Mesh(og,mat);t.overlay.name='PaintedFaceOverlay';t.overlay.frustumCulled=false;t.overlay.renderOrder=1000;t.mesh.add(t.overlay);
+}
+function faceRegion(a,b,c){
+ // Require a 2/3 majority. A single shared vertex therefore cannot make
+ // all surrounding triangles appear painted.
+ if(a===b&&a!==0)return a;
+ if(a===c&&a!==0)return a;
+ if(b===c&&b!==0)return b;
+ return 0;
 }
 function updateOverlay(t){
- ensureOverlay(t);const c=t.overlayColor.array,v=t.overlay.geometry.attributes.labelVisible.array;
- for(let i=0;i<t.labels.length;i++){const id=t.labels[i],hex=R[id][1],cc=new THREE.Color(hex);c[i*3]=cc.r;c[i*3+1]=cc.g;c[i*3+2]=cc.b;v[i]=id?1:0}
- t.overlayColor.needsUpdate=true;t.overlay.geometry.attributes.labelVisible.needsUpdate=true;
+ ensureOverlay(t);const c=t.overlayColor.array,v=t.overlayVisible.array,map=t.faceMap;
+ for(let i=0;i<map.length;i+=3){
+  const id=faceRegion(t.labels[map[i]],t.labels[map[i+1]],t.labels[map[i+2]]),cc=new THREE.Color(R[id][1]);
+  for(let j=0;j<3;j++){const k=i+j;c[k*3]=cc.r;c[k*3+1]=cc.g;c[k*3+2]=cc.b;v[k]=id?1:0}
+ }
+ t.overlayColor.needsUpdate=true;t.overlayVisible.needsUpdate=true;
 }
 function showLabels(){
  const show=$('paintColors')&&$('paintColors').checked,paint=$('paintMode')&&$('paintMode').checked;
@@ -61,7 +108,7 @@ function showLabels(){
 function togglePaint(){
  const on=$('paintMode').checked,lab=window.FootRigLab;if(!lab)return;
  finishStroke();
- if(on){$('wiggle').checked=false;$('reset').click();lab.controls.enabled=true;targets.forEach(t=>t.base.forEach(s=>s.m.side=THREE.DoubleSide));$('paintStatus').textContent='Paint mode active. Drag directly on the mesh.'}
+ if(on){$('wiggle').checked=false;$('reset').click();lab.controls.enabled=true;targets.forEach(t=>t.base.forEach(s=>s.m.side=THREE.DoubleSide));$('paintStatus').textContent='Paint mode active. Painted regions are displayed as crisp triangles.'}
  else {targets.forEach(t=>t.base.forEach(s=>s.m.side=s.side));$('paintStatus').textContent='Paint mode off.'}
  showLabels();
 }
