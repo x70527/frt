@@ -46,7 +46,7 @@ const matStatic=new THREE.MeshBasicMaterial({color:0xffa83d,transparent:true,opa
 const matActive=new THREE.MeshBasicMaterial({color:0x4ea1ff,transparent:true,opacity:.9,depthTest:false});
 const matTip=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.9,depthTest:false});
 function material(d){return d.static?matStatic:(d.endpoint?matTip:matActive);}
-function addMarker(d,p){const m=new THREE.Mesh(markerGeo,material(d));m.position.copy(p);scene.add(m);markers[d.name]=m;}
+function addMarker(d,p){const m=new THREE.Mesh(markerGeo,material(d));m.name=d.name;m.position.copy(p);scene.add(m);markers[d.name]=m;}
 function clearRig(){for(const n in markers)scene.remove(markers[n]);for(const n in markers)delete markers[n];while(boneGroup.children.length)boneGroup.remove(boneGroup.children[0]);}
 function redrawBones(){
  while(boneGroup.children.length)boneGroup.remove(boneGroup.children[0]);
@@ -101,19 +101,44 @@ transform.addEventListener('dragging-changed',e=>orbit.enabled=!e.value);
 
 let model=null, box=null;
 const supplied={
-'Left Index Tip':[-0.14410,-0.00500,0.13900],
-'Left Index Distal':[-0.14100,0.00200,0.12800],
-'Left Index Middle':[-0.13790,0.00900,0.11300],
-'Left Index Proximal':[-0.13400,0.01100,0.08900],
-'Left Index Metatarsal':[-0.12400,0.04800,0.03200],
-'Left Hallux Tip':[-0.12600,0.00000,0.14700],
-'Left Hallux Distal':[-0.11700,0.00500,0.12000],
-'Left Hallux Proximal':[-0.11000,0.01000,0.08900],
-'Left Hallux Metatarsal':[-0.11500,0.04500,0.03700],
-'Left Heel':[-0.10500,0.02600,-0.06800],
-'Left Ankle':[-0.11000,0.07800,-0.03000],
-'Left Leg':[-0.12000,0.45400,-0.03700]
+'Left Leg':[-0.12,0.454,-0.037],
+'Left Ankle':[-0.11,0.078,-0.03],
+'Left Heel':[-0.105,0.026,-0.068],
+'Left Hallux Metatarsal':[-0.112,0.0515,0.03],
+'Left Hallux Proximal':[-0.1105,0.012,0.0855],
+'Left Hallux Distal':[-0.117,0.005,0.12],
+'Left Hallux Tip':[-0.126,0,0.147],
+'Left Index Metatarsal':[-0.124,0.0525,0.0235],
+'Left Index Proximal':[-0.133,0.011,0.091],
+'Left Index Middle':[-0.1379,0.0095,0.1135],
+'Left Index Distal':[-0.141,0.0035,0.128],
+'Left Index Tip':[-0.1444,-0.0034,0.1419361425370647],
+'Left Middle Metatarsal':[-0.134,0.05631674191355709,0.0157302397787571],
+'Left Middle Proximal':[-0.14733293548226362,0.009316741913557025,0.08624755915999414],
+'Left Middle Middle':[-0.15183293548226362,0.01081674191355703,0.10598896687477831],
+'Left Middle Distal':[-0.1541329354822637,0.004316741913557024,0.11903436284512282],
+'Left Middle Tip':[-0.1568329354822635,-0.004583258086442974,0.13121442156732074],
+'Left Ring Metatarsal':[-0.14039974638819694,0.04981674191355708,0.0007302397787571093],
+'Left Ring Proximal':[-0.157899746388197,0.009316741913557022,0.07524755915999413],
+'Left Ring Middle':[-0.16339974638819701,0.008816741913557025,0.0979889668747783],
+'Left Ring Distal':[-0.16469974638819704,0.002316741913557027,0.10703436284512281],
+'Left Ring Tip':[-0.16519974638819698,-0.005083258086442934,0.11761442156732083],
+'Left Pinky Metatarsal':[-0.14746655729413033,0.021816741913557064,-0.0037697602212428878],
+'Left Pinky Proximal':[-0.16796655729413035,0.00831674191355706,0.05324755915999415],
+'Left Pinky Middle':[-0.17396655729413035,0.007316741913557067,0.08548896687477829],
+'Left Pinky Distal':[-0.17146655729413035,0.00031674191355706696,0.08941834533372467],
+'Left Pinky Tip':[-0.16946655729413035,-0.006683258086442927,0.09451442156732083]
 };
+function mirrorLeftToRight(){
+ if(!Object.keys(markers).length){status.textContent='Load the GLB first.';return;}
+ for(const d of defs){
+  if(!d.name.startsWith('Left '))continue;
+  const other=markers[counterpart(d.name)];
+  if(other)other.position.copy(mirrorPoint(markers[d.name].position));
+ }
+ redrawBones();save();syncInputs();status.textContent='All Left joint positions mirrored to Right.';requestRender();
+}
+$('mirrorLeft').addEventListener('click',mirrorLeftToRight);
 function buildDefaults(){
  clearRig(); const c=box.getCenter(new THREE.Vector3()),sz=box.getSize(new THREE.Vector3()); centerX=c.x;
  for(const side of ['Left','Right']){
@@ -131,7 +156,7 @@ function buildDefaults(){
   });
  }
  for(const [name,p] of Object.entries(supplied))markers[name].position.fromArray(p);
- for(const [name,p] of Object.entries(supplied)){const other=markers[counterpart(name)];if(other)other.position.set(2*centerX-p[0],p[1],p[2]);}
+ mirrorLeftToRight();
  redrawBones();pick('Left Ankle');save();
 }
 function setMaterials(){
@@ -148,7 +173,7 @@ $('file').addEventListener('change',e=>{
   if(box.isEmpty()){status.textContent='No visible geometry.';return;}
   const c=box.getCenter(new THREE.Vector3()),s=box.getSize(new THREE.Vector3()).length();
   orbit.target.copy(c);camera.position.copy(c).add(new THREE.Vector3(s*.6,s*.42,s*.82));camera.near=Math.max(s/10000,.00001);camera.far=s*20;camera.updateProjectionMatrix();
-  hint.style.display='none';buildDefaults();setMaterials();status.textContent='Model loaded. Supplied Hallux, Index, Heel, Ankle and Leg positions applied.';requestRender();
+  hint.style.display='none';buildDefaults();setMaterials();status.textContent='Model loaded. Your complete Left foot alignment was applied and mirrored to Right.';requestRender();
  },err=>status.textContent='GLB error: '+err.message);r.readAsArrayBuffer(f);
 });
 
