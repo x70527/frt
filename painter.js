@@ -82,7 +82,7 @@ void main(){vColor=color;vVisible=labelVisible;
 }`,
   fragmentShader:`precision mediump float; varying vec3 vColor; varying float vVisible; void main(){if(vVisible<0.5) discard; gl_FragColor=vec4(vColor,0.82);}`
  });
- t.overlay=new THREE.Mesh(og,mat);t.overlay.name='PaintedFaceOverlay';t.overlay.frustumCulled=false;t.overlay.renderOrder=1000;t.mesh.add(t.overlay);
+ t.overlay=t.mesh.isSkinnedMesh?new THREE.SkinnedMesh(og,mat):new THREE.Mesh(og,mat);if(t.mesh.isSkinnedMesh)t.overlay.bind(t.mesh.skeleton,t.mesh.bindMatrix);t.overlay.name='PaintedFaceOverlay';t.overlay.frustumCulled=false;t.overlay.renderOrder=1000;t.mesh.add(t.overlay);
 }
 function faceRegion(a,b,c){
  // Require a 2/3 majority. A single shared vertex therefore cannot make
