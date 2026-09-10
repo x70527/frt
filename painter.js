@@ -14,7 +14,7 @@ let targets=[],undo=[],redo=[],painting=false,stroke=null,ray=null,ndc=null,tmp=
 function addUI(){
  const panel=$('panel'),d=document.createElement('div');d.id='paintPanel';
  d.innerHTML='<hr><div class="nudgeHead"><b>Vertex Region Painter</b><label><input id="paintMode" type="checkbox"> Paint mode</label></div>'+
- '<div class="row"><label>Region <select id="region"></select></label><label>Brush <input id="brush" type="range" min="0.0015" max="0.025" step="0.0005" value="0.006"></label><span id="brushVal">0.0060</span></div>'+
+ '<div class="row"><label>Region <select id="region"></select></label><label>Brush <input id="brush" type="range" min="0" max="0.025" step="0.0005" value="0.006"></label><span id="brushVal">0.0060</span></div>'+'<div class="row"><label><input id="faceTap" type="checkbox" checked> Precise triangle tap</label></div>'+
  '<div class="row"><label><input id="mirrorPaint" type="checkbox" checked> Mirror paint</label><label><input id="paintColors" type="checkbox" checked> Show painted faces</label><button id="paintUndo">Undo</button><button id="paintRedo">Redo</button><button id="paintClear">Clear labels</button></div>'+
  '<div class="row"><button id="paintCopy">Copy JSON</button><button id="paintSave">Save now</button><button id="paintLoad">Load JSON</button><input id="paintImport" type="file" accept=".json,application/json" hidden></div>'+
  '<div id="paintStatus">Load the model, then enable Paint mode. Painting is saved automatically on-device.</div>'+
@@ -114,6 +114,12 @@ function togglePaint(){
 }
 function evtNDC(e){const rect=window.FootRigLab.renderer.domElement.getBoundingClientRect();ndc.set(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1)}
 function hit(e){if(!targets.length)return null;evtNDC(e);ray.setFromCamera(ndc,window.FootRigLab.camera);const xs=ray.intersectObjects(targets.map(t=>t.mesh),false);return xs[0]||null}
+function paintFace(h,id){
+ const t=targets.find(x=>x.mesh===h.object);if(!t||!h.face)return;
+ const idx=h.object.geometry.index?h.object.geometry.index.array:null;
+ const raw=[h.face.a,h.face.b,h.face.c];
+ for(const i of raw){const vi=idx?idx[i]:i;const old=t.labels[vi];if(old===id)continue;if(!stroke)stroke=new Map();const k=targets.indexOf(t)+':'+vi;if(!stroke.has(k))stroke.set(k,{ti:targets.indexOf(t),i:vi,old,neu:id});else stroke.get(k).neu=id;t.labels[vi]=id;}
+}
 function paintCenter(center,normal,id,rad2){
  for(let ti=0;ti<targets.length;ti++){const t=targets[ti],m=t.mesh,pa=m.geometry.attributes.position,na=m.geometry.attributes.normal;
   for(let i=0;i<pa.count;i++){
@@ -161,7 +167,7 @@ function onDown(e){
  const h=hit(e);if(!h)return;
  painting=true;pointerId=e.pointerId;stroke=new Map();lastPoint=h.point.clone();window.FootRigLab.controls.enabled=false;
  try{e.currentTarget.setPointerCapture(pointerId)}catch(_){}
- const n=h.face&&h.face.normal?h.face.normal.clone().transformDirection(h.object.matrixWorld):null;paintAt(h.point,n);e.preventDefault();
+ const n=h.face&&h.face.normal?h.face.normal.clone().transformDirection(h.object.matrixWorld):null;const br=+$('brush').value;if($('faceTap').checked&&br===0){paintFace(h,+$('region').value);if($('mirrorPaint').checked){/* exact mirrored face lookup is intentionally not guessed; brush mode handles symmetry */}showLabels();}else paintAt(h.point,n);e.preventDefault();
 }
 function onMove(e){
  if(!painting||e.pointerId!==pointerId)return;const h=hit(e);if(!h)return;
