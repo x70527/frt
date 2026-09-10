@@ -11,13 +11,12 @@ const R=[
 ['Heel','#60a3bc'],['Ankle','#82ccdd'],['Lower Leg','#b8e994'],['Toenails','#f368e0']];
 let targets=[],undo=[],redo=[],painting=false,stroke=null,ray=null,ndc=null,tmp=null,tmp2=null,pointerId=null,lastPoint=null;
 let mirrorMap=null,mirrorOffsets=[],mirrorRecords=[],mirrorStats={matched:0,total:0};
-let mirrorMap=null,mirrorOffsets=[],mirrorRecords=[],mirrorStats={matched:0,total:0};
 
 function addUI(){
  const panel=$('panel'),d=document.createElement('div');d.id='paintPanel';
  d.innerHTML='<hr><div class="nudgeHead"><b>Vertex Region Painter</b><label><input id="paintMode" type="checkbox"> Paint mode</label></div>'+
  '<div class="row"><label>Region <select id="region"></select></label><label>Brush <input id="brush" type="range" min="0" max="0.025" step="0.0005" value="0.006"></label><span id="brushVal">0.0060</span></div>'+'<div class="row"><label><input id="faceTap" type="checkbox" checked> Precise triangle tap</label></div>'+
- '<div class="row"><label><input id="mirrorPaint" type="checkbox" checked> Mirror paint</label><label><input id="paintColors" type="checkbox" checked> Show painted faces</label><button id="paintUndo">Undo</button><button id="paintRedo">Redo</button><button id="paintClear">Clear labels</button></div><div class="row"><button id="mirrorRL">Mirror Right → Left now</button><button id="mirrorLR">Mirror Left → Right now</button></div><div class="row"><button id="mirrorRL">Mirror Right → Left now</button><button id="mirrorLR">Mirror Left → Right now</button></div>'+
+ '<div class="row"><label><input id="mirrorPaint" type="checkbox" checked> Mirror paint</label><label><input id="paintColors" type="checkbox" checked> Show painted faces</label><button id="paintUndo">Undo</button><button id="paintRedo">Redo</button><button id="paintClear">Clear labels</button></div><div class="row"><button id="mirrorRL">Mirror Right → Left now</button><button id="mirrorLR">Mirror Left → Right now</button></div>'+
  '<div class="row"><button id="paintCopy">Copy JSON</button><button id="paintSave">Save now</button><button id="paintLoad">Load JSON</button><input id="paintImport" type="file" accept=".json,application/json" hidden></div>'+
  '<div id="paintStatus">Load the model, then enable Paint mode. Painting is saved automatically on-device.</div>'+
  '<p>Painting still stores anatomical labels per vertex. The visualizer displays those labels as crisp, discrete mesh triangles with no soft blending. A triangle is shown only when at least two of its three vertices agree on the same painted region, preventing one shared vertex from visually bleeding into surrounding triangles. Each complete drag is one undo step.</p>';
@@ -25,7 +24,7 @@ function addUI(){
  const sel=$('region');R.forEach((r,i)=>{let o=document.createElement('option');o.value=i;o.textContent=(i?'':'Eraser / ')+r[0];sel.appendChild(o)});
  $('brush').oninput=()=>{$('brushVal').textContent=(+$('brush').value).toFixed(4)};
  $('paintMode').onchange=togglePaint;$('paintColors').onchange=showLabels;$('paintUndo').onclick=doUndo;$('paintRedo').onclick=doRedo;$('paintClear').onclick=clearAll;
- $('paintCopy').onclick=copyJSON;$('paintSave').onclick=saveLocal;$('paintLoad').onclick=()=>$('paintImport').click();$('paintImport').onchange=importJSON;$('mirrorRL').onclick=()=>syncMirror('Right');$('mirrorLR').onclick=()=>syncMirror('Left');$('mirrorRL').onclick=()=>syncMirror('Right');$('mirrorLR').onclick=()=>syncMirror('Left');
+ $('paintCopy').onclick=copyJSON;$('paintSave').onclick=saveLocal;$('paintLoad').onclick=()=>$('paintImport').click();$('paintImport').onchange=importJSON;$('mirrorRL').onclick=()=>syncMirror('Right');$('mirrorLR').onclick=()=>syncMirror('Left');
 }
 function buildTargets(){
  targets=[];const lab=window.FootRigLab;if(!lab)return;
