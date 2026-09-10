@@ -5,7 +5,7 @@ function applySpread(){
   const base=rest.get(q);if(!base)continue;q.quaternion.copy(base);
   const n=boneParts(q.name);if(n.length<3||n[2]!=='Proximal')continue;
   const side=n[0],toe=n[1];if(!['Hallux','Index','Middle','Ring','Pinky'].includes(toe))continue;
-  let f=toe==='Hallux'?-1:toe==='Index'?0:toe==='Middle'?.38:toe==='Ring'?.72:1;
+  let f=toe==='Hallux'?1:toe==='Index'?0:toe==='Middle'?-0.38:toe==='Ring'?-0.72:-1;
   if(side==='Right')f=-f;
   q.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),A*f));
  }
