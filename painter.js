@@ -10,12 +10,13 @@ const R=[
 ['Forefoot / Ball','#f8c291'],['Instep / Top Midfoot','#e58e26'],['Sole / Arch','#78e08f'],
 ['Heel','#60a3bc'],['Ankle','#82ccdd'],['Lower Leg','#b8e994'],['Toenails','#f368e0']];
 let targets=[],undo=[],redo=[],painting=false,stroke=null,ray=null,ndc=null,tmp=null,tmp2=null,pointerId=null,lastPoint=null;
+let mirrorMap=null,mirrorOffsets=[],mirrorRecords=[],mirrorStats={matched:0,total:0};
 
 function addUI(){
  const panel=$('panel'),d=document.createElement('div');d.id='paintPanel';
  d.innerHTML='<hr><div class="nudgeHead"><b>Vertex Region Painter</b><label><input id="paintMode" type="checkbox"> Paint mode</label></div>'+
  '<div class="row"><label>Region <select id="region"></select></label><label>Brush <input id="brush" type="range" min="0" max="0.025" step="0.0005" value="0.006"></label><span id="brushVal">0.0060</span></div>'+'<div class="row"><label><input id="faceTap" type="checkbox" checked> Precise triangle tap</label></div>'+
- '<div class="row"><label><input id="mirrorPaint" type="checkbox" checked> Mirror paint</label><label><input id="paintColors" type="checkbox" checked> Show painted faces</label><button id="paintUndo">Undo</button><button id="paintRedo">Redo</button><button id="paintClear">Clear labels</button></div>'+
+ '<div class="row"><label><input id="mirrorPaint" type="checkbox" checked> Mirror paint</label><label><input id="paintColors" type="checkbox" checked> Show painted faces</label><button id="paintUndo">Undo</button><button id="paintRedo">Redo</button><button id="paintClear">Clear labels</button></div><div class="row"><button id="mirrorRL">Mirror Right → Left now</button><button id="mirrorLR">Mirror Left → Right now</button></div>'+
  '<div class="row"><button id="paintCopy">Copy JSON</button><button id="paintSave">Save now</button><button id="paintLoad">Load JSON</button><input id="paintImport" type="file" accept=".json,application/json" hidden></div>'+
  '<div id="paintStatus">Load the model, then enable Paint mode. Painting is saved automatically on-device.</div>'+
  '<p>Painting still stores anatomical labels per vertex. The visualizer displays those labels as crisp, discrete mesh triangles with no soft blending. A triangle is shown only when at least two of its three vertices agree on the same painted region, preventing one shared vertex from visually bleeding into surrounding triangles. Each complete drag is one undo step.</p>';
@@ -23,7 +24,7 @@ function addUI(){
  const sel=$('region');R.forEach((r,i)=>{let o=document.createElement('option');o.value=i;o.textContent=(i?'':'Eraser / ')+r[0];sel.appendChild(o)});
  $('brush').oninput=()=>{$('brushVal').textContent=(+$('brush').value).toFixed(4)};
  $('paintMode').onchange=togglePaint;$('paintColors').onchange=showLabels;$('paintUndo').onclick=doUndo;$('paintRedo').onclick=doRedo;$('paintClear').onclick=clearAll;
- $('paintCopy').onclick=copyJSON;$('paintSave').onclick=saveLocal;$('paintLoad').onclick=()=>$('paintImport').click();$('paintImport').onchange=importJSON;
+ $('paintCopy').onclick=copyJSON;$('paintSave').onclick=saveLocal;$('paintLoad').onclick=()=>$('paintImport').click();$('paintImport').onchange=importJSON;$('mirrorRL').onclick=()=>syncMirror('Right');$('mirrorLR').onclick=()=>syncMirror('Left');
 }
 function buildTargets(){
  targets=[];const lab=window.FootRigLab;if(!lab)return;
@@ -33,8 +34,66 @@ function buildTargets(){
   targets.push(t);const ms=Array.isArray(mesh.material)?mesh.material:[mesh.material];
   t.base=ms.map(x=>({m:x,side:x.side}));
  }
- undo=[];redo=[];restoreLocal();showLabels();
- $('paintStatus').textContent='Painter ready: '+targets.length+' mesh(es), '+targets.reduce((a,t)=>a+t.labels.length,0)+' vertices.';
+ undo=[];redo=[];buildMirrorMap();restoreLocal();showLabels();
+ $('paintStatus').textContent='Painter ready: '+targets.length+' mesh(es), '+targets.reduce((a,t)=>a+t.labels.length,0)+' vertices. Exact mirror map: '+mirrorStats.matched+'/'+mirrorStats.total+' vertices.';
+}
+function buildMirrorMap(){
+ mirrorOffsets=[];mirrorRecords=[];mirrorStats={matched:0,total:0};
+ let total=0;for(const t of targets){mirrorOffsets.push(total);total+=t.labels.length}
+ mirrorOffsets.push(total);mirrorMap=new Int32Array(total);mirrorMap.fill(-1);
+ const left=new Map(),right=new Map(),cell=.00075;
+ const key=(x,y,z)=>Math.round(x/cell)+','+Math.round(y/cell)+','+Math.round(z/cell);
+ for(let ti=0;ti<targets.length;ti++){
+  const t=targets[ti],pa=t.mesh.geometry.attributes.position;
+  for(let i=0;i<pa.count;i++){
+   const v=new THREE.Vector3();
+   if(t.mesh.isSkinnedMesh&&t.mesh.getVertexPosition)t.mesh.getVertexPosition(i,v);else v.fromBufferAttribute(pa,i);
+   v.applyMatrix4(t.mesh.matrixWorld);
+   const gi=mirrorOffsets[ti]+i,rec={ti,i,gi,x:v.x,y:v.y,z:v.z};
+   mirrorRecords[gi]=rec;
+   const map=v.x<X?left:right;
+   const k=key(v.x,v.y,v.z);let a=map.get(k);if(!a)map.set(k,a=[]);a.push(rec);
+  }
+ }
+ const link=(from,to)=>{
+  for(const rec of from.values())for(const a of rec){
+   const tx=2*X-a.x,ty=a.y,tz=a.z;
+   let best=null,bd=Infinity,cx=Math.round(tx/cell),cy=Math.round(ty/cell),cz=Math.round(tz/cell);
+   for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){
+    const arr=to.get((cx+dx)+','+(cy+dy)+','+(cz+dz));if(!arr)continue;
+    for(const q of arr){const d=(q.x-tx)**2+(q.y-ty)**2+(q.z-tz)**2;if(d<bd){bd=d;best=q}}
+   }
+   // Never guess across a toe gap. Only accept a genuinely coincident mirror.
+   if(best&&bd<=cell*cell*2.25){mirrorMap[a.gi]=best.gi;mirrorMap[best.gi]=a.gi;}
+  }
+ };
+ link(left,right);
+ mirrorStats.total=total;mirrorStats.matched=Array.from(mirrorMap).filter(v=>v>=0).length;
+}
+function mirrorOf(ti,i){
+ if(!mirrorMap)return null;const gi=mirrorOffsets[ti]+i,mg=mirrorMap[gi];return mg<0?null:mirrorRecords[mg];
+}
+function recordLabel(ti,i,id){
+ const t=targets[ti],old=t.labels[i];if(old===id)return false;
+ if(!stroke)stroke=new Map();const k=ti+':'+i;
+ if(!stroke.has(k))stroke.set(k,{ti,i,old,neu:id});else stroke.get(k).neu=id;
+ t.labels[i]=id;return true;
+}
+function recordMirrored(ti,i,id){
+ recordLabel(ti,i,id);
+ if(!$('mirrorPaint').checked)return;
+ const m=mirrorOf(ti,i);if(m)recordLabel(m.ti,m.i,id);
+}
+function syncMirror(fromSide){
+ if(!targets.length||!mirrorMap){$('paintStatus').textContent='Mirror map is not ready.';return}
+ finishStroke();let changed=0;
+ for(let gi=0;gi<mirrorRecords.length;gi++){
+  const a=mirrorRecords[gi];if(!a||((a.x<X)?'Left':'Right')!==fromSide)continue;
+  const mg=mirrorMap[gi];if(mg<0)continue;const z=mirrorRecords[mg],id=targets[a.ti].labels[a.i];
+  if(targets[z.ti].labels[z.i]!==id){targets[z.ti].labels[z.i]=id;changed++}
+ }
+ undo=[];redo=[];showLabels();saveLocal();
+ $('paintStatus').textContent='Mirrored '+fromSide+' foot labels exactly to the opposite foot ('+changed+' vertices updated).';
 }
 function ensureOverlay(t){
  if(t.overlay)return;
@@ -118,7 +177,7 @@ function paintFace(h,id){
  const t=targets.find(x=>x.mesh===h.object);if(!t||!h.face)return;
  const idx=h.object.geometry.index?h.object.geometry.index.array:null;
  const raw=[h.face.a,h.face.b,h.face.c];
- for(const i of raw){const vi=idx?idx[i]:i;const old=t.labels[vi];if(old===id)continue;if(!stroke)stroke=new Map();const k=targets.indexOf(t)+':'+vi;if(!stroke.has(k))stroke.set(k,{ti:targets.indexOf(t),i:vi,old,neu:id});else stroke.get(k).neu=id;t.labels[vi]=id;}
+ for(const i of raw){const vi=idx?idx[i]:i;recordMirrored(targets.indexOf(t),vi,id);}
 }
 function paintCenter(center,normal,id,rad2){
  for(let ti=0;ti<targets.length;ti++){const t=targets[ti],m=t.mesh,pa=m.geometry.attributes.position,na=m.geometry.attributes.normal;
@@ -126,17 +185,13 @@ function paintCenter(center,normal,id,rad2){
    if(m.isSkinnedMesh&&m.getVertexPosition)m.getVertexPosition(i,tmp);else tmp.fromBufferAttribute(pa,i);tmp.applyMatrix4(m.matrixWorld);
    if(tmp.distanceToSquared(center)>rad2)continue;
    if(normal&&na){tmp2.fromBufferAttribute(na,i).transformDirection(m.matrixWorld);if(tmp2.dot(normal)<-0.05)continue}
-   const old=t.labels[i];if(old===id)continue;
-   if(!stroke)stroke=new Map();const k=ti+':'+i;
-   if(!stroke.has(k))stroke.set(k,{ti,i,old,neu:id});else stroke.get(k).neu=id;
-   t.labels[i]=id;
+   recordMirrored(ti,i,id);
   }
  }
 }
 function paintAt(p,normal,refresh=true){
  const rad=+$('brush').value,rad2=rad*rad,id=+$('region').value;
  paintCenter(p,normal,id,rad2);
- if($('mirrorPaint').checked)paintCenter(new THREE.Vector3(2*X-p.x,p.y,p.z),normal,id,rad2);
  if(refresh)showLabels();
 }
 function paintSegment(a,b,normal){
@@ -167,7 +222,7 @@ function onDown(e){
  const h=hit(e);if(!h)return;
  painting=true;pointerId=e.pointerId;stroke=new Map();lastPoint=h.point.clone();window.FootRigLab.controls.enabled=false;
  try{e.currentTarget.setPointerCapture(pointerId)}catch(_){}
- const n=h.face&&h.face.normal?h.face.normal.clone().transformDirection(h.object.matrixWorld):null;const br=+$('brush').value;if($('faceTap').checked&&br===0){paintFace(h,+$('region').value);if($('mirrorPaint').checked){/* exact mirrored face lookup is intentionally not guessed; brush mode handles symmetry */}showLabels();}else paintAt(h.point,n);e.preventDefault();
+ const n=h.face&&h.face.normal?h.face.normal.clone().transformDirection(h.object.matrixWorld):null;const br=+$('brush').value;if($('faceTap').checked&&br===0){paintFace(h,+$('region').value);showLabels();}else paintAt(h.point,n);e.preventDefault();
 }
 function onMove(e){
  if(!painting||e.pointerId!==pointerId)return;const h=hit(e);if(!h)return;
